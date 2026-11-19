@@ -30,10 +30,17 @@ shrinkage anchors, never as the forecast itself):
   night history (one distinct read, as in the practice cases) forecasts
   mostly from the prior and a wide spread, while a two-day history
   (the final case) forecasts mostly from its own trend.  When the
-  history is flat and the horizon is short, the median is also shifted
-  down by a refresh allowance: Exophase refreshes hours apart, and a
-  refresh dilutes every rate by roughly the jump in players tracked,
-  which the practice answers show cost about 1.5 logit units.
+  history is flat, the median is also shifted down by a refresh
+  allowance: Exophase refreshes hours apart, and a refresh dilutes
+  every rate by roughly the jump in players tracked.  The allowance
+  scales with the log-time distance the forecast spans (player growth
+  is roughly linear in log time early on, so the dilution over a span
+  grows with it) and is capped; it decays as distinct reads
+  accumulate, so it is ~0 for the final case, whose history prices
+  dilution through its own trend.  v1 decayed the allowance with
+  horizon, which is backwards — dilution accumulates while players
+  keep joining — and under-shifted everywhere it applied: practice
+  0.42, 19-hour real-data test 1.68 (see METHODOLOGY.md).
 
   Spread: a base that grows with horizon, plus the trend fit's residual
   SD scaled by how far the target is extrapolated, plus a refresh term
@@ -314,10 +321,26 @@ def forecast_case(case, name):
         categories.append((cat, prior))
 
     # Refresh allowance: with a flat history a refresh in the horizon
-    # dilutes every rate; it decays as distinct reads accumulate and as
-    # the horizon lengthens (a long horizon's trend already prices it).
+    # dilutes every rate.  It decays as distinct reads accumulate (a
+    # history with a real trend prices dilution itself), but it must
+    # NOT decay with horizon: dilution accumulates while players keep
+    # joining, so a longer horizon spans more refreshes, not fewer.
+    # v1 decayed it as (1 - horizon/24h) and under-shifted badly: on
+    # the 19-hour real-data test (flat launch-night history -> live
+    # 14:48Z page, N 638 -> ~12,000) v1 scored 1.68, and even on the
+    # 90-minute practice it scored 0.42 with a shift of only ~0.75
+    # logit against a ~1.6 logit refresh.  The allowance now scales
+    # with the log-time distance the forecast spans (x_target -
+    # x_last: player growth is roughly linear in log time early on,
+    # so the dilution over a span grows with it), capped at 1.5 x
+    # flatness.  On the flat launch-night history x_last is 0 (the
+    # first read predates release), so the cap binds and the allowance
+    # is flatness x 1.5 at every horizon; on a history with real reads
+    # it grows with the spanned distance.  With many distinct reads
+    # (the final case) flatness is ~0 and the allowance is ~0, so the
+    # final forecast is unchanged by this change.
     flatness = math.exp(-n_distinct / 2.0)
-    refresh_factor = flatness * (1.0 - min(1.0, horizon_h / 24.0))
+    refresh_factor = flatness * min(1.5, 1.259 * max(0.0, x_target - x_last))
 
     medians = []
     spreads = []

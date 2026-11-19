@@ -125,8 +125,12 @@ anchors.
    the median is shifted down (up to ~1.1 logit × a category scale):
    Exophase refreshes hours apart and a refresh dilutes every rate
    by roughly the jump in players tracked. The allowance decays as
-   distinct reads accumulate and as the horizon lengthens, so it is
-   ~0 for the final case.
+   distinct reads accumulate and scales with the log-time distance
+   the forecast spans (player growth is roughly linear in log time
+   early on, so the dilution over a span grows with it), capped at
+   1.5 × flatness — it does NOT decay with horizon (v1 did, which
+   is backwards: dilution accumulates while players keep joining).
+   With many distinct reads it is ~0, so it is ~0 for the final case.
 5. **Story-chain funnel.** Later chapters share one progression
    process with chapter 1, so their medians are blended 50/50 with
    what chapter 1's median implies through the prior funnel ratios
@@ -162,18 +166,21 @@ time comes from the case file). Runs in well under a second per case.
 
 ### 4.1 Practice (reconstructed answer, §2.2)
 
+v2 (refresh allowance scaled by log-time distance, §4.5):
+
 | case | this entry | house baseline |
 |---|---|---|
-| p00 pinball | **0.420** | 1.508 |
-| p01 pinball | **0.423** | 1.508 |
-| mean | **0.421** | 1.508 |
-| typical miss | 0.20 pp | 0.68 pp |
+| p00 pinball | **0.299** | 1.508 |
+| p01 pinball | **0.300** | 1.508 |
+| mean | **0.300** | 1.508 |
+| typical miss | 0.06 pp | 0.68 pp |
 | 90% coverage | 1.00 | 0.00 |
 
-The gain comes from the refresh allowance plus a wide spread: the
-practice histories carry no trend signal at all, so the only way to
-score well is to expect the refresh. The kit's own text says the
-practice "rewards a forecast that expects a refresh".
+v1 scored 0.421 here (miss 0.20 pp). The gain comes from the
+refresh allowance plus a wide spread: the practice histories carry
+no trend signal at all, so the only way to score well is to expect
+the refresh. The kit's own text says the practice "rewards a
+forecast that expects a refresh".
 
 ### 4.2 Synthetic final (tests/backtest.py)
 
@@ -206,7 +213,17 @@ late members are the hardest quantities in this contest.
 ### 4.3 Tuning that was tried and kept / rejected
 
 - Refresh shift + wide spread on flat histories: kept (practice
-  1.51 → 0.42).
+  1.51 → 0.42 in v1, → 0.30 in v2 after the allowance stopped
+  decaying with horizon, §4.5).
+- Horizon-scaled story funnel (weight rising with horizon, to price
+  the chapter lag): REJECTED — Test B barely moved (0.388 → 0.387),
+  because the late chapters' own medians were already ~0.2% there;
+  the over-forecast is the sticky prior / low data weight, not the
+  funnel. A rising funnel also moved the synthetic final only
+  0.523 → 0.520, which is circular (the synthetic truth is built
+  from the same priors), so it was not taken as evidence.
+- Players-growth slope cap 3.0 → 2.0: REJECTED — no effect on any
+  of the four validations (the cap never binds where it matters).
 - Earners/players split vs logit trend alone: kept (the split is
   what prices dilution separately from progression).
 - Story-chain funnel (50/50): kept (slow-scenario loss 0.65 → 0.61,
@@ -228,6 +245,53 @@ their levels. If real progression is much slower than the priors
 over-forecast the story chain; if much faster, it will under-forecast
 it. The house superbot model forecast is a separate bar this entry
 may or may not beat on the final day. Nothing here guarantees a prize.
+
+### 4.5 The 19-hour real-data test (v2, 2026-11-19)
+
+The model was built when the only data was launch night (flat page
++ one refresh). By 14:48Z on 19 Nov, ~15 h of real progression
+existed on the public Exophase page (crawled that day, saved in
+`tests/live_20261119_1448z.json`): players tracked ~12,000 (from
+3,868 at 04:30Z and 638 on launch night — a 3.1× dilution since the
+refresh). Most rates fell ~3–4× (earners flat: story missions
+0.23% → 0.06%, platinum 0.10% → 0.03%); the risers against
+dilution were Chapter 1 (0.49% → 0.73%, earners ~19 → ~88), Beat
+Cal (1.16% → 1.89%, ~45 → ~227), arcade (0.39% → 0.41%) and
+Breakfast Run (0.23% → 0.24%). Gone Fishing fell to 99.99% — its
+first tracked non-earner.
+
+`tests/test_19h.py` scores the program against those live rates:
+
+| test | v1 | v2 | persistence |
+|---|---|---|---|
+| A: flat launch-night history (p00) → 14:48Z, 708 min | 1.682 (cov 0.11) | **0.803** (cov 0.95) | 2.370 |
+| B: history + 04:30Z refresh read → 14:48Z, 618 min | 0.388 (cov 1.00) | **0.280** (cov 1.00) | 0.833 |
+
+What v1 got wrong in Test A: with a flat history the refresh
+allowance was the ONLY dilution mechanism, and v1 decayed it with
+horizon — exactly backwards, since dilution accumulates while
+players keep joining (N grew 638 → ~12,000 over the 12 h span, a
+~2.9 logit dilution; v1 allowed ~0.4 logit). v2 scales the
+allowance with the log-time distance the forecast spans, capped at
+1.5 × flatness. Test B shows the earners/players split itself works
+on real data: with just two distinct reads it scored 0.280 against
+live rates, and v2's bigger allowance improves it further. The
+remaining error in both tests is the story chain's late members
+(Ch3/Ch4/final still over-forecast ~2–3× at 15 h: their earners
+are still ~flat while N triples) and the fast growers
+under-forecast (Ch1, Beat Cal) — the funnel is not the cause
+(§4.3), it is the chapter lag, which shrinks by day 7.
+
+Honest limit: v2's change is ~final-neutral. In the final case the
+history has many distinct reads, so flatness is ~0 and the
+allowance is ~0 either way; on the synthetic final (11 distinct
+reads) v2's medians move by at most 0.018 logit and the mean loss
+is unchanged (0.5230 → 0.5230), and on the real final (~20+
+distinct reads) the shift is ~100× smaller still. v2 was submitted
+because it is a real, measured improvement to the model's dilution
+handling on every validation that can observe it (19 h test, both
+practice cases), with the final-case forecast unchanged to within
+noise — not because the practice board decides the prize.
 
 ## 5. Reproduce
 

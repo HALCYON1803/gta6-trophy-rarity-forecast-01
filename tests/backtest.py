@@ -260,3 +260,9 @@ if __name__ == "__main__":
     validity_test()
     practice_test()
     synthetic_test()
+    # 19-hour real-data test (tests/test_19h.py): flat launch-night
+    # history and history+04:30Z refresh, both scored against the
+    # live Exophase page crawled 2026-11-19 14:48 UTC.
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_19h import main as test_19h_main
+    test_19h_main()
